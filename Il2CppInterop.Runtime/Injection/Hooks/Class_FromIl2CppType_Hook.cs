@@ -41,7 +41,11 @@ namespace Il2CppInterop.Runtime.Injection.Hooks
             var classFromTypeAPI = InjectorHelpers.GetIl2CppExport(nameof(IL2CPP.il2cpp_class_from_il2cpp_type));
             Logger.Instance.LogTrace("il2cpp_class_from_il2cpp_type: 0x{ClassFromTypeApiAddress}", classFromTypeAPI.ToInt64().ToString("X2"));
 
-            return XrefScannerLowLevel.JumpTargets(classFromTypeAPI).Single();
+            var target = XrefScannerLowLevel.JumpTargets(classFromTypeAPI).Single();
+            // arm64: resolve through any wedged `b real` thunk so we detour the real function.
+            if (XrefScannerLowLevel.IsArm64)
+                target = XrefScannerLowLevel.Arm64ResolveThunk(target);
+            return target;
         }
     }
 }

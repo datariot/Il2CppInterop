@@ -35,7 +35,7 @@ namespace Il2CppInterop.Runtime.Injection
                 return;
             }
 
-            Logger.Instance.LogTrace("{MethodName} found: 0x{MethodPtr}", TargetMethodName, methodPtr.ToInt64().ToString("X2"));
+            Logger.Instance.LogWarning("[arm64-hook] {MethodName} resolved: 0x{MethodPtr}", TargetMethodName, methodPtr.ToInt64().ToString("X"));
 
             _detour = GetDetour();
             Detour.Apply(methodPtr, _detour, out _original);

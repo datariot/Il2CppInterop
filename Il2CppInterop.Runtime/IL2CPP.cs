@@ -199,6 +199,14 @@ public static unsafe class IL2CPP
         var length = il2cpp_string_length(il2CppString);
         var chars = il2cpp_string_chars(il2CppString);
 
+        // [macos-debug] probe the OOM site: capture what a "bogus length" actually is, and don't crash.
+        if (length < 0 || length > 0x200000)
+        {
+            Logger.Instance.LogWarning(
+                $"[macos-debug] Il2CppStringToManaged: bogus length={length} (0x{length:X}) str=0x{il2CppString.ToInt64():X} chars=0x{((IntPtr)chars).ToInt64():X}");
+            return "<macos-debug-bogus>";
+        }
+
         return new string(chars, 0, length);
     }
 

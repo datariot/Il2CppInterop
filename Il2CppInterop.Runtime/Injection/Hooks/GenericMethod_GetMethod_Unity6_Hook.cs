@@ -94,9 +94,12 @@ namespace Il2CppInterop.Runtime.Injection.Hooks
             var getVirtualMethodAPI = InjectorHelpers.GetIl2CppExport(nameof(IL2CPP.il2cpp_object_get_virtual_method));
             if (getVirtualMethodAPI == IntPtr.Zero) return IntPtr.Zero;
 
-            // Follow the jump into the actual function body
+            // Follow the export thunk's jump into the actual function body (Object::GetVirtualMethod)
             var getVirtualMethod = XrefScannerLowLevel.JumpTargets(getVirtualMethodAPI).FirstOrDefault();
             if (getVirtualMethod == IntPtr.Zero) return IntPtr.Zero;
+
+            if (XrefScannerLowLevel.IsArm64)
+                return FindTargetMethodArm64(getVirtualMethod);
 
             // We are looking for the call to GetGenericVirtualMethod
             var xrefs = XrefScannerLowLevel.JumpTargets(getVirtualMethod).ToArray();
@@ -113,12 +116,49 @@ namespace Il2CppInterop.Runtime.Injection.Hooks
 
             IntPtr candidate = finalXrefs.Last();
 
-            // VERIFICATION: On Linux, GenericMethod::GetMethod is a large function. 
+            // VERIFICATION: On Linux, GenericMethod::GetMethod is a large function.
             // If the address is too close to the caller, it's probably wrong.
 #if DEBUG
             Logger.Instance.LogDebug($"[Scanner] Found GenericMethod::GetMethod candidate: 0x{candidate:X}");
 #endif
 
+            return candidate;
+        }
+
+        // arm64 (Apple Silicon / clang) lays this chain out differently than the x86 codegen the
+        // upstream heuristic assumes. Reverse-engineered from BTD6's GameAssembly.dylib:
+        //   Object::GetVirtualMethod  --tail-call B-->  GetGenericVirtualMethod
+        //   GetGenericVirtualMethod   --BL-->           GenericMethod::GetMethod(Il2CppGenericMethod&)  [1-param worker]
+        //   GenericMethod::GetMethod(MethodInfo*, classInst, methodInst)  [3-param, our delegate]  sits
+        //     immediately before the 1-param worker and also BL's into it.
+        // So: take the body's far tail-call (skipping near local branches and PLT/helper BLs) to reach
+        // GetGenericVirtualMethod, follow its first BL to the worker, then walk back to the prologue of
+        // the function directly preceding the worker — the 3-param GetMethod that matches our delegate.
+        private IntPtr FindTargetMethodArm64(IntPtr getVirtualMethod)
+        {
+            var bodyBase = (long)getVirtualMethod;
+            var bodyTargets = XrefScannerLowLevel.JumpTargetsArm64Tagged(getVirtualMethod).ToArray();
+
+            // GetGenericVirtualMethod is reached via a tail-call (B, not BL) to a *far* address
+            // (outside this function's body), distinguishing it from near local branches.
+            IntPtr getGenericVirtualMethod = bodyTargets
+                .Where(t => !t.isCall && ((long)t.target < bodyBase || (long)t.target > bodyBase + 0x2000))
+                .Select(t => t.target)
+                .LastOrDefault();
+            if (getGenericVirtualMethod == IntPtr.Zero) return IntPtr.Zero;
+
+            // Inside GetGenericVirtualMethod, the first real call (BL) is the 1-param GetMethod worker.
+            IntPtr worker = XrefScannerLowLevel.JumpTargetsArm64Tagged(getGenericVirtualMethod)
+                .Where(t => t.isCall)
+                .Select(t => t.target)
+                .FirstOrDefault();
+            if (worker == IntPtr.Zero) return IntPtr.Zero;
+
+            // The 3-param GenericMethod::GetMethod (our delegate's ABI) is the function immediately
+            // preceding the worker; recover its entry by walking back from just before the worker.
+            IntPtr candidate = XrefScannerLowLevel.Arm64FunctionStart((IntPtr)((long)worker - 4));
+            Logger.Instance.LogWarning("[arm64] GenericMethod::GetMethod ggvm=0x{G} worker=0x{W} target=0x{T}",
+                ((long)getGenericVirtualMethod).ToString("X"), ((long)worker).ToString("X"), ((long)candidate).ToString("X"));
             return candidate;
         }
     }
