@@ -116,7 +116,25 @@ namespace Il2CppInterop.Runtime.Injection.Hooks
 
         public override IntPtr FindTargetMethod()
         {
+            // arm64: the x86 xref traversal walks clang's outlined tail-call fragments and lands on a
+            // shared hashmap-guard helper (an outlined `cbz x0; b lookup` stub), NOT the real function.
+            // Detouring that corrupts every caller -> garbage deref -> crash during heavy class injection
+            // (e.g. BTD Mod Helper). Until a proper arm64 resolution is ported, skip this hook: injected
+            // classes resolved by type-definition index fall back to the runtime (some features may be
+            // unavailable) but the game stays stable.
+            if (XrefScannerLowLevel.IsArm64)
+                return IntPtr.Zero;
             return FindGetTypeInfoFromTypeDefinitionIndex();
+        }
+
+        public override void TargetMethodNotFound()
+        {
+            if (XrefScannerLowLevel.IsArm64)
+            {
+                Logger.Instance.LogWarning("MetadataCache::GetTypeInfoFromTypeDefinitionIndex hook skipped on arm64 (xref traversal not yet ported); not fatal.");
+                return;
+            }
+            base.TargetMethodNotFound();
         }
     }
 }
