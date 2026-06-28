@@ -116,15 +116,45 @@ namespace Il2CppInterop.Runtime.Injection.Hooks
 
         public override IntPtr FindTargetMethod()
         {
-            // arm64: the x86 xref traversal walks clang's outlined tail-call fragments and lands on a
-            // shared hashmap-guard helper (an outlined `cbz x0; b lookup` stub), NOT the real function.
-            // Detouring that corrupts every caller -> garbage deref -> crash during heavy class injection
-            // (e.g. BTD Mod Helper). Until a proper arm64 resolution is ported, skip this hook: injected
-            // classes resolved by type-definition index fall back to the runtime (some features may be
-            // unavailable) but the game stays stable.
+            // arm64: the x86 xref walk (.First()/.Last()/.ElementAt over JumpTargets) lands on the wrong
+            // target because clang emits `bl helper; b realfunc` (two flow targets) where x86 tail-called
+            // a single function, and il2cpp exports are 4-byte `b real` thunks. Use an arm64-specific walk
+            // that resolves thunk chains and follows only the *tail-call* branch (B, not BL) at each step.
             if (XrefScannerLowLevel.IsArm64)
-                return IntPtr.Zero;
+                return FindGetTypeInfoFromTypeDefinitionIndexArm64();
             return FindGetTypeInfoFromTypeDefinitionIndex();
+        }
+
+        // arm64 resolution chain (verified by static analysis against BTD6's GameAssembly.dylib,
+        // Unity 6000.0.58f2, il2cpp metadata v31/v29-handles):
+        //   il2cpp_image_get_class export (b-thunk) -> Image::GetClass
+        //     -> [first tail-call B] Image::GetTypeInfoFromHandle wrapper
+        //       -> [first tail-call B] MetadataCache::GetTypeInfoFromTypeDefinitionIndex(int)
+        // The target opens with `if (index == -1) return null; type = s_TypeInfoTable[index];` matching
+        // the MethodDelegate(int index) signature exactly.
+        private static IntPtr FindGetTypeInfoFromTypeDefinitionIndexArm64()
+        {
+            var imageGetClass = XrefScannerLowLevel.Arm64ResolveThunk(
+                InjectorHelpers.GetIl2CppExport(nameof(IL2CPP.il2cpp_image_get_class)));
+            Logger.Instance.LogTrace("arm64 Image::GetClass: 0x{Addr}", imageGetClass.ToInt64().ToString("X2"));
+
+            var handleWrapper = XrefScannerLowLevel.Arm64ResolveThunk(FirstTailBranch(imageGetClass));
+            Logger.Instance.LogTrace("arm64 Image::GetTypeInfoFromHandle: 0x{Addr}", handleWrapper.ToInt64().ToString("X2"));
+
+            var getTypeInfo = XrefScannerLowLevel.Arm64ResolveThunk(FirstTailBranch(handleWrapper));
+            Logger.Instance.LogTrace("arm64 MetadataCache::GetTypeInfoFromTypeDefinitionIndex: 0x{Addr}", getTypeInfo.ToInt64().ToString("X2"));
+
+            return getTypeInfo;
+        }
+
+        // Returns the first *tail-call* branch (unconditional B, isCall == false) out of fn.
+        // clang's `bl helper; b realfunc` pattern means the real continuation is the B, not the BL.
+        private static IntPtr FirstTailBranch(IntPtr fn)
+        {
+            foreach (var (target, isCall) in XrefScannerLowLevel.JumpTargetsArm64Tagged(fn))
+                if (!isCall)
+                    return target;
+            return IntPtr.Zero;
         }
 
         public override void TargetMethodNotFound()

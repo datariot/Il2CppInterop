@@ -291,13 +291,13 @@ public static unsafe class IL2CPP
         if (isFieldPointer)
         {
             if (il2cpp_class_is_valuetype(Il2CppClassPointerStore<T>.NativeClassPtr))
-                objectPointer = il2cpp_value_box(Il2CppClassPointerStore<T>.NativeClassPtr, objectPointer);
+                objectPointer = ValueBoxGuarded(Il2CppClassPointerStore<T>.NativeClassPtr, objectPointer);
             else
                 objectPointer = *(IntPtr*)objectPointer;
         }
 
         if (!valueTypeWouldBeBoxed && il2cpp_class_is_valuetype(Il2CppClassPointerStore<T>.NativeClassPtr))
-            objectPointer = il2cpp_value_box(Il2CppClassPointerStore<T>.NativeClassPtr, objectPointer);
+            objectPointer = ValueBoxGuarded(Il2CppClassPointerStore<T>.NativeClassPtr, objectPointer);
 
         if (typeof(T) == typeof(string))
             return (T)(object)Il2CppStringToManaged(objectPointer);
@@ -848,6 +848,28 @@ public static unsafe class IL2CPP
 
     [DllImport("GameAssembly", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
     public static extern IntPtr il2cpp_value_box(IntPtr klass, IntPtr data);
+
+    // arm64 injection diagnostic + guard. The il2cpp->managed trampoline (CreateTrampoline) boxes
+    // value-type *arguments* and the legacy invoker boxes value-type *returns* via il2cpp_value_box.
+    // On arm64 some injected-method invocations arrive with a NULL data pointer -> il2cpp Object::Box
+    // does memmove(dest, src=NULL, instance_size-0x10) -> hard SIGSEGV during Mod Helper ModContent
+    // registration (GA RVA 0x66c1d4). Until the root marshalling bug is fixed, log the offending klass
+    // and return a null object instead of crashing so we can observe which method/type triggers it.
+    public static IntPtr ValueBoxGuarded(IntPtr klass, IntPtr data)
+    {
+        if (data == IntPtr.Zero)
+        {
+            string name = "<null klass>";
+            if (klass != IntPtr.Zero)
+                try { name = il2cpp_class_get_name_(klass) ?? "<?>"; } catch { /* klass garbage */ }
+            Logger.Instance.LogWarning(
+                "[arm64-box] il2cpp_value_box NULL data for valuetype '{Klass}' (klass=0x{Addr}) -> returning null (would crash)",
+                name, klass.ToInt64().ToString("X"));
+            return IntPtr.Zero;
+        }
+
+        return il2cpp_value_box(klass, data);
+    }
 
     [DllImport("GameAssembly", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
     public static extern void il2cpp_monitor_enter(IntPtr obj);

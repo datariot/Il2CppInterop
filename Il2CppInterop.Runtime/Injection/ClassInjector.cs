@@ -878,7 +878,7 @@ public static unsafe partial class ClassInjector
                     .GetField(nameof(Il2CppClassPointerStore<int>.NativeClassPtr));
                 body.Emit(OpCodes.Ldsfld, classField);
                 body.Emit(OpCodes.Ldloca, returnValue);
-                body.Emit(OpCodes.Call, typeof(IL2CPP).GetMethod(nameof(IL2CPP.il2cpp_value_box))!);
+                body.Emit(OpCodes.Call, typeof(IL2CPP).GetMethod(nameof(IL2CPP.ValueBoxGuarded))!);
             }
         }
 
@@ -950,7 +950,7 @@ public static unsafe partial class ClassInjector
                 body.Emit(OpCodes.Ldc_I8, Il2CppClassPointerStore.GetNativeClassPointer(parameter).ToInt64());
                 body.Emit(OpCodes.Conv_I);
                 body.Emit(Environment.Is64BitProcess ? OpCodes.Ldarg : OpCodes.Ldarga_S, i);
-                body.Emit(OpCodes.Call, typeof(IL2CPP).GetMethod(nameof(IL2CPP.il2cpp_value_box)));
+                body.Emit(OpCodes.Call, typeof(IL2CPP).GetMethod(nameof(IL2CPP.ValueBoxGuarded)));
             }
             else
             {

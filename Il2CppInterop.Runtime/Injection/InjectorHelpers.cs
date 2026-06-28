@@ -9,6 +9,7 @@ using System.Reflection.Emit;
 using System.Runtime.InteropServices;
 using System.Threading;
 using Il2CppInterop.Common;
+using Il2CppInterop.Common.XrefScans;
 using Il2CppInterop.Runtime.Injection.Hooks;
 using Il2CppInterop.Runtime.Runtime;
 using Il2CppInterop.Runtime.Runtime.VersionSpecific.Assembly;
@@ -168,6 +169,7 @@ namespace Il2CppInterop.Runtime.Injection
         private static readonly Class_GetFieldDefaultValue_Hook GetFieldDefaultValueHook = new();
         private static readonly Class_FromIl2CppType_Hook FromIl2CppTypeHook = new();
         private static readonly Class_FromName_Hook FromNameHook = new();
+        private static readonly ValueBox_Guard_Hook ValueBoxGuardHook = new();
 
         internal static void Setup()
         {
@@ -183,6 +185,8 @@ namespace Il2CppInterop.Runtime.Injection
             ClassInit ??= FindClassInit();
             FromIl2CppTypeHook.ApplyHook();
             FromNameHook.ApplyHook();
+            if (XrefScannerLowLevel.IsArm64)
+                ValueBoxGuardHook.ApplyHook();
         }
 
         internal static long CreateClassToken(IntPtr classPointer)

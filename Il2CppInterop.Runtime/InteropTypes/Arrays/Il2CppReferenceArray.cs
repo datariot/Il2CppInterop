@@ -80,7 +80,7 @@ public class Il2CppReferenceArray<T> : Il2CppArrayBase<T> where T : Il2CppObject
     private static unsafe T? WrapElement(IntPtr memberPointer)
     {
         if (ourElementIsValueType)
-            memberPointer = IL2CPP.il2cpp_value_box(Il2CppClassPointerStore<T>.NativeClassPtr, memberPointer);
+            memberPointer = IL2CPP.ValueBoxGuarded(Il2CppClassPointerStore<T>.NativeClassPtr, memberPointer);
         else
             memberPointer = *(IntPtr*)memberPointer;
 
