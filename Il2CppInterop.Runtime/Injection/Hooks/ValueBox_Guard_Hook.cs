@@ -29,21 +29,28 @@ namespace Il2CppInterop.Runtime.Injection.Hooks
         {
             if (data == IntPtr.Zero)
             {
+                // arm64: the generated interop boxes some value types (e.g. default(StreamingContext)
+                // for Json.NET serialization callbacks during Mod Helper ModContent registration) with a
+                // NULL data pointer, which would make Object::Box memmove from null and crash. Boxing a
+                // value type with no source data is, semantically, boxing default(T): allocate a fresh
+                // zero-initialized object of the value type's class (il2cpp_object_new zeroes the payload).
+                // That hands callers a valid boxed default(T) instead of null, so downstream code that
+                // reads the boxed value's fields keeps working.
+                if (klass == IntPtr.Zero)
+                    return IntPtr.Zero;
+
                 if (s_LoggedKlasses.TryAdd(klass, 0))
                 {
-                    string name = "<null klass>";
+                    string name = "<?>";
                     string ns = "";
-                    if (klass != IntPtr.Zero)
-                    {
-                        try { name = IL2CPP.il2cpp_class_get_name_(klass) ?? "<?>"; } catch { }
-                        try { ns = IL2CPP.il2cpp_class_get_namespace_(klass) ?? ""; } catch { }
-                    }
+                    try { name = IL2CPP.il2cpp_class_get_name_(klass) ?? "<?>"; } catch { }
+                    try { ns = IL2CPP.il2cpp_class_get_namespace_(klass) ?? ""; } catch { }
                     Logger.Instance.LogWarning(
-                        "[arm64-box-native] il2cpp_value_box NULL data for valuetype '{Ns}{Dot}{Name}' (klass=0x{Addr}) -> returning null (would have crashed)",
+                        "[arm64-box-native] il2cpp_value_box NULL data for valuetype '{Ns}{Dot}{Name}' (klass=0x{Addr}) -> boxing default(T) (would have crashed)",
                         ns, ns.Length > 0 ? "." : "", name, klass.ToInt64().ToString("X"));
                 }
 
-                return IntPtr.Zero;
+                return IL2CPP.il2cpp_object_new(klass);
             }
 
             return Original(klass, data);
